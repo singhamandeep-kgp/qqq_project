@@ -32,8 +32,18 @@ def check_data_completeness(QQQ: pd.DataFrame) -> pd.DataFrame:
     print("Percent observations with weird delta not falling in expected bounds %:", 100 * (~(QQQ['callDelta'].between(0, 1)) | (~QQQ['putDelta'].between(-1, 0))).mean())
     
     print("Percent observations with negative DTE %:", 100 * (QQQ['dte'] < 0).mean())
+    
+    print("Percent observations with vid > ask %:",
+    100 * ((QQQ["callBidPrice"] > QQQ["callAskPrice"]) |
+             (QQQ["putBidPrice"] > QQQ["putAskPrice"])).mean())
+
+    print("Removing bad observations (bid > ask) from dataframe.")
+
+    QQQ = QQQ[~((QQQ["callBidPrice"] > QQQ["callAskPrice"]) |
+          (QQQ["putBidPrice"] > QQQ["putAskPrice"]))]
+
 
     del liq_bad, greeks_bad, price_bad, underlying_bad
     gc.collect()
 
-    return None
+    return QQQ
