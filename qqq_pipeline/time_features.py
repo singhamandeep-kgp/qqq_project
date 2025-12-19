@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import gc
 
-expiry_dates = [
+# Default option expiry dates (kept for backward compatibility)
+DEFAULT_EXPIRY_DATES = [
     pd.Timestamp('2020-01-17'),
     pd.Timestamp('2020-02-21'),
     pd.Timestamp('2020-03-20'),
@@ -86,51 +87,132 @@ expiry_dates = [
     pd.Timestamp('2025-12-19')
 ]
 
-expiry_dates_set = set(expiry_dates) # Convert list to set for efficient lookup
+DEFAULT_EXPIRY_DATES_SET = set(DEFAULT_EXPIRY_DATES)
 
-def prepare_daily_dataframe(QQQ: pd.DataFrame) -> pd.DataFrame:
-    daily = (
-        QQQ.sort_values("tradeDate")
-        .groupby("tradeDate", as_index=False)
-        .agg(spot=("spotPrice", "first"))
-    )
-    return daily
 
-def add_nextDayReturn(daily: pd.DataFrame) -> pd.DataFrame:
-    daily["ret_1d"]       = daily["spot"].pct_change()
-    daily["nextDayRet"]   = daily["ret_1d"].shift(-1)
-    return daily
+class TimeFeatures:
+    """Object-oriented wrapper for time-based feature engineering on QQQ daily data.
 
-def add_realisedVolFeatures(daily: pd.DataFrame) -> pd.DataFrame:
-    daily["vol_5d"]  = daily["ret_1d"].rolling(5).std()  * np.sqrt(252)
-    daily["vol_21d"] = daily["ret_1d"].rolling(21).std() * np.sqrt(252)
-    daily["vol_63d"] = daily["ret_1d"].rolling(63).std() * np.sqrt(252)
-    return daily
+    Usage:
+        tf = TimeFeatures()  # can pass custom expiry dates or vol windows
+        daily = tf.build_features(QQQ)
 
-def add_calendarEffectFeatures(daily: pd.DataFrame) -> pd.DataFrame:
-    daily["is_monday"] = (daily["tradeDate"].dt.weekday == 0).astype(int)
-    daily["is_friday"] = (daily["tradeDate"].dt.weekday == 4).astype(int)
-    daily["is_option_expiry"] = daily["tradeDate"].isin(expiry_dates_set).astype(int)
-    daily["month"] = daily["tradeDate"].dt.month
+    The class mirrors the previous module-level functions but groups configuration
+    and behavior into an instance (expiry dates, vol windows, annualisation).
+    """
 
-    # month-end (last trading day in each calendar month)
-    last_trading_day_in_month = daily.groupby(daily["tradeDate"].dt.to_period("M"))["tradeDate"].transform("max")
-    daily["is_month_end_trading"] = (daily["tradeDate"] == last_trading_day_in_month).astype(int)
-    del last_trading_day_in_month
+    def __init__(
+        self,
+        expiry_dates: list | None = None,
+        vol_windows: tuple = (5, 21, 63),
+        annualisation: float = 252.0,
+    ) -> None:
+        self.expiry_dates = (
+            expiry_dates if expiry_dates is not None else DEFAULT_EXPIRY_DATES
+        )
+        self.expiry_dates_set = set(self.expiry_dates)
+        self.vol_windows = tuple(vol_windows)
+        self.annualisation = float(annualisation)
 
-    # quarter-end (last trading day in each calendar quarter)
-    last_trading_day_in_quarter = daily.groupby(daily["tradeDate"].dt.to_period("Q"))["tradeDate"].transform("max")
-    daily["is_quarter_end_trading"] = (daily["tradeDate"] == last_trading_day_in_quarter).astype(int)
-    del last_trading_day_in_quarter
+    def prepare_daily_dataframe(self, QQQ: pd.DataFrame) -> pd.DataFrame:
+        """Aggregate raw QQQ intraday/row data to a daily spot series.
 
-    # year-end (last trading day in calendar year)
-    last_trading_day_in_year = daily.groupby(daily["tradeDate"].dt.to_period("Y"))["tradeDate"].transform("max")
-    daily["is_year_end_trading"] = (daily["tradeDate"] == last_trading_day_in_year).astype(int)
-    del last_trading_day_in_year
+        Expects `QQQ` to have columns `tradeDate` and `spotPrice`.
+        """
+        df = QQQ.copy()
+        df["tradeDate"] = pd.to_datetime(df["tradeDate"])  # be robust
+        daily = (
+            df.sort_values("tradeDate")
+            .groupby("tradeDate", as_index=False)
+            .agg(spot=("spotPrice", "first"))
+        )
+        return daily
 
-    gc.collect()
+    def add_nextDayReturn(self, daily: pd.DataFrame) -> pd.DataFrame:
+        daily = daily.copy()
+        daily["ret_1d"] = daily["spot"].pct_change()
+        daily["nextDayRet"] = daily["ret_1d"].shift(-1)
+        return daily
 
-    return daily
+    def add_realisedVolFeatures(self, daily: pd.DataFrame) -> pd.DataFrame:
+        daily = daily.copy()
+        for w in self.vol_windows:
+            col = f"vol_{w}d"
+            daily[col] = daily["ret_1d"].rolling(w).std() * np.sqrt(self.annualisation)
+        return daily
+
+    def add_calendarEffectFeatures(self, daily: pd.DataFrame) -> pd.DataFrame:
+        daily = daily.copy()
+        if not pd.api.types.is_datetime64_any_dtype(daily["tradeDate"]):
+            daily["tradeDate"] = pd.to_datetime(daily["tradeDate"])
+
+        daily["is_monday"] = (daily["tradeDate"].dt.weekday == 0).astype(int)
+        daily["is_friday"] = (daily["tradeDate"].dt.weekday == 4).astype(int)
+        daily["is_option_expiry"] = daily["tradeDate"].isin(self.expiry_dates_set).astype(int)
+        daily["month"] = daily["tradeDate"].dt.month
+
+        # month-end (last trading day in each calendar month)
+        last_trading_day_in_month = daily.groupby(daily["tradeDate"].dt.to_period("M"))["tradeDate"].transform(
+            "max"
+        )
+        daily["is_month_end_trading"] = (daily["tradeDate"] == last_trading_day_in_month).astype(int)
+        del last_trading_day_in_month
+
+        # quarter-end (last trading day in each calendar quarter)
+        last_trading_day_in_quarter = daily.groupby(daily["tradeDate"].dt.to_period("Q"))["tradeDate"].transform(
+            "max"
+        )
+        daily["is_quarter_end_trading"] = (daily["tradeDate"] == last_trading_day_in_quarter).astype(int)
+        del last_trading_day_in_quarter
+
+        # year-end (last trading day in calendar year)
+        last_trading_day_in_year = daily.groupby(daily["tradeDate"].dt.to_period("Y"))["tradeDate"].transform(
+            "max"
+        )
+        daily["is_year_end_trading"] = (daily["tradeDate"] == last_trading_day_in_year).astype(int)
+        del last_trading_day_in_year
+
+        gc.collect()
+        return daily
+
+    def build_features(
+        self,
+        QQQ: pd.DataFrame,
+        compute_realised: bool = True,
+        compute_calendar: bool = True,
+    ) -> pd.DataFrame:
+        """High level method to go from raw `QQQ` to a daily dataframe with features.
+
+        Parameters:
+            QQQ: raw dataframe with `tradeDate` and `spotPrice` columns
+            compute_realised: whether to add realised volatility features
+            compute_calendar: whether to add calendar effect features
+        """
+        daily = self.prepare_daily_dataframe(QQQ)
+        daily = self.add_nextDayReturn(daily)
+        if compute_realised:
+            daily = self.add_realisedVolFeatures(daily)
+        if compute_calendar:
+            daily = self.add_calendarEffectFeatures(daily)
+        return daily
+
+
+# Backwards-compatible convenience function
+def build_time_features(
+    QQQ: pd.DataFrame,
+    expiry_dates: list | None = None,
+    vol_windows: tuple = (5, 21, 63),
+    annualisation: float = 252.0,
+    compute_realised: bool = True,
+    compute_calendar: bool = True,
+) -> pd.DataFrame:
+    """Convenience wrapper matching the older procedural style.
+
+    Example:
+        daily = build_time_features(QQQ)
+    """
+    tf = TimeFeatures(expiry_dates=expiry_dates, vol_windows=vol_windows, annualisation=annualisation)
+    return tf.build_features(QQQ, compute_realised=compute_realised, compute_calendar=compute_calendar)
 
 
 
