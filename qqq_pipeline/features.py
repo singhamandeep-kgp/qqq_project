@@ -310,7 +310,7 @@ class volume_OI_features():
         QQQ = self.calc_volume_oi(QQQ)
         daily = self.create_delta_dte_buckets(QQQ, daily)
 
-        return daily
+        return QQQ, daily
 
 def build_volume_oi_features(QQQ: pd.DataFrame,
                             daily: pd.DataFrame, 
@@ -319,6 +319,3 @@ def build_volume_oi_features(QQQ: pd.DataFrame,
 
     voi = volume_OI_features(dte_buckets = dte_buckets, dte_buckets_labels = dte_buckets_labels)
     return voi.build_features(QQQ = QQQ, daily = daily)
-    
-                                            
-
