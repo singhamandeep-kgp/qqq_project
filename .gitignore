@@ -42,4 +42,4 @@ Thumbs.db
 *.ipynb
 
 # Data (optional - uncomment if you want to ignore CSV files)
- *.csv
+*.csv
