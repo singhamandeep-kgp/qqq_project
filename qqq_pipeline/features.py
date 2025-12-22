@@ -1,7 +1,12 @@
-from .vol_helpers import find_atm_straddle_iv
 import numpy as np
 import pandas as pd
 import gc
+
+# Import vol_helpers - works both as package import and direct script execution
+try:
+    from .vol_helpers import find_atm_straddle_iv
+except ImportError:
+    from vol_helpers import find_atm_straddle_iv
 
 # Default option expiry dates 
 DEFAULT_EXPIRY_DATES = [
