@@ -356,6 +356,7 @@ class vol_features():
     def atm_straddle_iv(self, daily, dtes):
         for dte in dtes:
             daily[f'atm_straddle_iv_{dte}d'] = np.sqrt((daily[f'call_iv_{dte}d']**2 + daily[f'put_iv_{dte}d']**2)/2)
+            daily.drop(columns=[f'call_iv_{dte}d', f'put_iv_{dte}d'], inplace=True)
         return daily
         
         
